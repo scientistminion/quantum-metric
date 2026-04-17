@@ -24,30 +24,19 @@ SYNTHETIC_OUTCAR = """ running on some machine
 
    volume of cell :      100.0000
 
-  plasma frequency squared (from intraband transitions) (eV):
-  XX YY ZZ:
-     10.0  0.0  0.0
-     0.0  10.0  0.0
-     0.0  0.0  10.0
+ plasma frequency squared (from intraband transitions) (eV^2)
+  --------------------------------------------------------------------------------------
+      10.000       0.000       0.000
+       0.000      10.000       0.000
+       0.000       0.000      10.000
 
-  plasma frequency squared (from interband transitions (eV):
-  XX YY ZZ:
-     40.0  0.0  0.0
-     0.0  40.0  0.0
-     0.0  0.0  40.0
-
-  sumrule: sum of plasma frequencies squared should yield       50.0
-"""
-
-SYNTHETIC_POSCAR = """Test
-   1.0
-     3.0  0.0  0.0
-     0.0  4.0  0.0
-     0.0  0.0  5.0
-   H
-   1
-Direct
-   0.0  0.0  0.0
+ plasma frequency squared (from interband transitions, int dw w eps(2)(w)) (eV^2)
+  --------------------------------------------------------------------------------------
+      40.000       0.000       0.000      -0.000       0.000       0.000
+       0.000       0.000      40.000       0.000       0.000      -0.000
+       0.000      -0.000       0.000       0.000      40.000       0.000
+  --------------------------------------------------------------------------------------
+ sumrule: sum of plasma frequencies squared should yield (valence only):      50.000
 """
 
 
