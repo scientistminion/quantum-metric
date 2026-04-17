@@ -39,6 +39,17 @@ SYNTHETIC_OUTCAR = """ running on some machine
  sumrule: sum of plasma frequencies squared should yield (valence only):      50.000
 """
 
+SYNTHETIC_POSCAR = """Test
+   1.0
+     3.0  0.0  0.0
+     0.0  4.0  0.0
+     0.0  0.0  5.0
+   H
+   1
+Direct
+   0.0  0.0  0.0
+"""
+
 
 def _make_dielectric_dat(path: Path, anisotropic: bool = True):
     """Make a simple eps_imag.dat with a Lorentzian peak."""
