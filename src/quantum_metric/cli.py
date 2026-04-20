@@ -123,6 +123,8 @@ def _print_table(result: QMetricResult):
     row("N_itinerant / atom", result.electrons.n_itinerant_per_atom)
     row("N_bound / atom", result.electrons.n_bound_per_atom)
     row("Bound electron density", result.electrons.bound_electron_density, "1/Å³")
+    if result.electrons.fsum_residual is not None:
+        row("f-sum residual (diagnostic)", result.electrons.fsum_residual)
 
     # --- quantum metric
     table.add_section()
