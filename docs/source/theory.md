@@ -58,13 +58,19 @@ This is simple and transparent — the itinerant fraction is just the Drude weig
 
 ### Method 2: f-sum rule (`--method fsum`)
 
+Both itinerant and bound counts come directly from their respective plasma frequencies:
+
 $$
 N_{\rm itinerant} = \frac{\varepsilon_0 m_e V}{\hbar^2}\,\omega^2_{p,\mathrm{intra}}
 $$
 
 $$
-N_{\rm bound} = N_{\rm e} - N_{\rm itinerant}
+N_{\rm bound} = \frac{\varepsilon_0 m_e V}{\hbar^2}\,\omega^2_{p,\mathrm{inter}}
 $$
+
+If the f-sum rule is exactly satisfied, $N_{\rm itinerant} + N_{\rm bound} = N_{\rm e}$.
+The library reports the residual $N_{\rm e} - (N_{\rm itinerant} + N_{\rm bound})$ as a
+diagnostic of sum-rule satisfaction.
 
 This uses the absolute magnitude of the intraband plasma frequency to compute a Drude-based electron count, rather than the relative ratio.
 
