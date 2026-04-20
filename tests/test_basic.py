@@ -111,13 +111,21 @@ def test_kai_electron_count():
 
 
 def test_fsum_electron_count():
-    # Just check it runs and produces a finite positive number
+    # Check both itinerant and bound are computed from their own plasma freqs
     e = compute_n_itinerant_fsum(
-        plasma_intra_ev2=10.0, nelect=26.0, volume_ang3=100.0, natoms=3
+        plasma_intra_ev2=10.0,
+        plasma_inter_ev2=40.0,
+        nelect=26.0,
+        volume_ang3=100.0,
+        natoms=3,
     )
     assert e.n_itinerant > 0
+    assert e.n_bound > 0
     assert e.method == "fsum"
-
+    # The ratio of the two should match the ratio of plasma frequencies squared
+    assert e.n_bound / e.n_itinerant == pytest.approx(40.0 / 10.0, rel=1e-10)
+    # The residual should be the difference from NELECT
+    assert e.fsum_residual == pytest.approx(26.0 - (e.n_itinerant + e.n_bound))
 
 # --- End-to-end pipeline ---------------------------------------------------
 def test_calculator_from_directory_kai(vasp_dir):
