@@ -38,6 +38,9 @@ class ElectronCount:
     n_itinerant_per_atom: float
     n_bound_per_atom: float
     bound_electron_density: float  # N_bound / V, units: 1/Angstrom^3
+    # Diagnostic for 'fsum' method only: NELECT - (N_itinerant + N_bound)
+    # Should be close to zero if the f-sum rule is satisfied.
+    fsum_residual: float | None = None
 
 
 def compute_kai(plasma_intra: float, plasma_inter: float) -> float:
@@ -68,20 +71,23 @@ def compute_n_itinerant_kai(
 
 def compute_n_itinerant_fsum(
     plasma_intra_ev2: float,
+    plasma_inter_ev2: float,
     nelect: float,
     volume_ang3: float,
     natoms: int,
 ) -> ElectronCount:
-    """Compute electron counts via the f-sum rule.
+    """Compute electron counts via the f-sum rule for both intraband and interband.
 
-        N_itinerant = (epsilon_0 * m_e * V * omega_p_intra^2) / hbar^2
+        N_itinerant = (epsilon_0 * m_e * V / hbar^2) * omega_p_intra^2
+        N_bound     = (epsilon_0 * m_e * V / hbar^2) * omega_p_inter^2
+
+    Both come directly from their respective plasma frequencies, rather than
+    deriving N_bound as NELECT - N_itinerant. The residual NELECT - (N_it + N_bd)
+    is reported as a diagnostic of f-sum rule satisfaction.
 
     Important: this formula follows the original pipeline convention where
     omega_p^2 from VASP is used directly in eV^2 (not converted to (rad/s)^2).
-    This apparent unit mismatch is handled by the implicit eV unit in VASP's
-    plasma frequency output: plugging the eV^2 value into the formula with
-    SI constants yields the correct dimensionless electron count to within
-    the expected precision of the f-sum rule.
+    See docstring in previous version for unit discussion.
     """
     # Precomputed: epsilon_0 * m_e / hbar^2
     CONST = (EPSILON_0 * M_E) / (HBAR ** 2)
@@ -89,10 +95,13 @@ def compute_n_itinerant_fsum(
     # Volume: Angstrom^3 -> m^3
     volume_si = volume_ang3 * ANG3_TO_M3
 
-    # Use plasma_intra_ev2 directly (no unit conversion — see docstring)
+    # Direct f-sum counts from intraband and interband plasma frequencies
     n_it = CONST * volume_si * plasma_intra_ev2
+    n_bd = CONST * volume_si * plasma_inter_ev2
 
-    n_bd = nelect - n_it
+    # Diagnostic: how well the sum rule is satisfied
+    residual = nelect - (n_it + n_bd)
+
     return ElectronCount(
         method="fsum",
         kai=None,
@@ -101,4 +110,5 @@ def compute_n_itinerant_fsum(
         n_itinerant_per_atom=float(n_it / natoms),
         n_bound_per_atom=float(n_bd / natoms),
         bound_electron_density=float(n_bd / volume_ang3),
+        fsum_residual=float(residual),
     )
