@@ -97,6 +97,7 @@ class QMetricResult:
             "N_itinerant_per_atom": self.electrons.n_itinerant_per_atom,
             "N_bound_per_atom": self.electrons.n_bound_per_atom,
             "bound_electron_density": self.electrons.bound_electron_density,
+            "fsum_residual": self.electrons.fsum_residual,
             # Metric
             "sqrtG_over_A_xx": self.metric.sqrtG_over_A_xx,
             "prefactor": self.metric.prefactor,
@@ -240,6 +241,7 @@ class QMetricCalculator:
         elif method == "fsum":
             electrons = compute_n_itinerant_fsum(
                 plasma_intra_ev2=o.plasma_intra_xx,
+                plasma_inter_ev2=o.plasma_inter_xx,
                 nelect=o.nelect,
                 volume_ang3=o.volume,
                 natoms=o.natoms,
