@@ -1,9 +1,10 @@
 """
 Quantum metric calculation.
 
-Formula (applied for both 'kai' and 'fsum' electron-counting methods):
+Formula:
+    sqrtG = sqrt( prefactor * I_αα / n_bound^(1/3) )
 
-    sqrtG = sqrt( prefactor * I / n_bound^(1/3) )
+where n_bound is computed from the f-sum rule (see electrons.py).
 
 where:
   - prefactor = 0.0694 Angstrom^-1 eV^-1 (unit-conversion constant)
