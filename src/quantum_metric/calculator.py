@@ -16,14 +16,13 @@ Override files:
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
 from quantum_metric.electrons import (
     ElectronCount,
-    compute_n_itinerant_fsum,
-    compute_n_itinerant_kai,
+    compute_electron_count,
 )
 from quantum_metric.io import (
     DielectricData,
@@ -51,7 +50,6 @@ class QMetricResult:
 
     # Inputs summary
     material: str
-    method: str                 # "kai" or "fsum"
     volume: float               # Ang^3
     nelect: float
     natoms: int
@@ -65,7 +63,7 @@ class QMetricResult:
     # Optical integrals
     optical: OpticalIntegralsAllDirections
 
-    # Electron counts
+    # Electron counts (f-sum rule)
     electrons: ElectronCount
 
     # Quantum metric
@@ -76,7 +74,6 @@ class QMetricResult:
         """Flatten the result into a dict suitable for DataFrame/JSON/TSV."""
         d = {
             "Material": self.material,
-            "Method": self.method,
             "Volume_Ang3": self.volume,
             "NELECT": self.nelect,
             "NAtoms": self.natoms,
@@ -90,14 +87,14 @@ class QMetricResult:
             "sigma_int_xx": self.optical.xx.sigma_int,
             "wsigma_xx": self.optical.xx.wsigma,
             "sigma_xx_over_wsquare": self.optical.xx.sigma_over_wsquare,
-            # Electrons
-            "Kai": self.electrons.kai,
+            # Electrons (f-sum rule via hydrogen relations)
             "N_itinerant": self.electrons.n_itinerant,
             "N_bound": self.electrons.n_bound,
             "N_itinerant_per_atom": self.electrons.n_itinerant_per_atom,
             "N_bound_per_atom": self.electrons.n_bound_per_atom,
+            "itinerant_electron_density": self.electrons.itinerant_electron_density,
             "bound_electron_density": self.electrons.bound_electron_density,
-            "fsum_residual": self.electrons.fsum_residual,
+            "sumrule_check_NELECT": self.electrons.sumrule_check,
             # Metric
             "sqrtG_over_A_xx": self.metric.sqrtG_over_A_xx,
             "prefactor": self.metric.prefactor,
@@ -208,19 +205,22 @@ class QMetricCalculator:
     def compute(
         self,
         *,
-        method: str = "kai",
         prefactor: float = DEFAULT_PREFACTOR,
         e_min: float = 0.0,
         e_max: Optional[float] = None,
     ) -> QMetricResult:
         """Run the full pipeline.
 
+        Electron counting uses the f-sum rule applied to the intraband
+        plasma frequency, with the prefactor expressed via hydrogen-atom
+        relations:
+
+            n = (1 / 16π) × (1 / a_B³) × (X_vasp / E_0²)
+
         Parameters
         ----------
-        method : 'kai' | 'fsum'
-            How to compute N_itinerant / N_bound.
         prefactor : float
-            Unit-conversion constant for the metric (default 0.0694).
+            Unit-conversion constant for the metric (default 0.0694 Å⁻¹ eV⁻¹).
         e_min, e_max : float
             Integration window on eps_imag (eV).
         """
@@ -230,24 +230,13 @@ class QMetricCalculator:
 
         optical = compute_optical_integrals(d, e_min=e_min, e_max=e_max)
 
-        if method == "kai":
-            electrons = compute_n_itinerant_kai(
-                plasma_intra=o.plasma_intra_xx,
-                plasma_inter=o.plasma_inter_xx,
-                nelect=o.nelect,
-                volume=o.volume,
-                natoms=o.natoms,
-            )
-        elif method == "fsum":
-            electrons = compute_n_itinerant_fsum(
-                plasma_intra_ev2=o.plasma_intra_xx,
-                plasma_inter_ev2=o.plasma_inter_xx,
-                nelect=o.nelect,
-                volume_ang3=o.volume,
-                natoms=o.natoms,
-            )
-        else:
-            raise ValueError(f"Unknown method: {method!r}. Use 'kai' or 'fsum'.")
+        electrons = compute_electron_count(
+            plasma_intra_ev2=o.plasma_intra_xx,
+            nelect=o.nelect,
+            volume_ang3=o.volume,
+            natoms=o.natoms,
+            sumrule_ev2=o.sumrule,
+        )
 
         metric = compute_quantum_metric(
             I_xx=optical.xx.I,
@@ -259,7 +248,6 @@ class QMetricCalculator:
 
         return QMetricResult(
             material=self.material,
-            method=method,
             volume=o.volume,
             nelect=o.nelect,
             natoms=o.natoms,
