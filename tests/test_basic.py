@@ -7,13 +7,12 @@ import pytest
 
 from quantum_metric import (
     QMetricCalculator,
-    compute_kai,
-    compute_n_itinerant_fsum,
-    compute_n_itinerant_kai,
+    compute_electron_count,
     read_dielectric,
     read_outcar,
     read_poscar,
 )
+from quantum_metric.electrons import PREFACTOR_N
 
 
 # --- Fixture builders -------------------------------------------------------
@@ -97,57 +96,67 @@ def test_read_dielectric_dat(vasp_dir):
 
 
 # --- Electron-count tests ---------------------------------------------------
-def test_kai_ratio():
-    k = compute_kai(10.0, 40.0)
-    assert k == pytest.approx(0.2, rel=1e-12)
+def test_prefactor_value():
+    """The hydrogen-relations prefactor 1/(16π a_B³ E_0²) should be ~7.263e-4 Å⁻³ eV⁻²."""
+    assert PREFACTOR_N == pytest.approx(7.263e-4, rel=1e-3)
 
 
-def test_kai_electron_count():
-    e = compute_n_itinerant_kai(plasma_intra=10.0, plasma_inter=40.0,
-                                nelect=26.0, volume=100.0, natoms=3)
-    assert e.kai == pytest.approx(0.2)
-    assert e.n_itinerant == pytest.approx(5.2)
-    assert e.n_bound == pytest.approx(20.8)
-
-
-def test_fsum_electron_count():
-    # Check both itinerant and bound are computed from their own plasma freqs
-    e = compute_n_itinerant_fsum(
+def test_electron_count_synthetic():
+    """Check basic f-sum electron count on synthetic data."""
+    e = compute_electron_count(
         plasma_intra_ev2=10.0,
-        plasma_inter_ev2=40.0,
         nelect=26.0,
         volume_ang3=100.0,
         natoms=3,
+        sumrule_ev2=50.0,
     )
-    assert e.n_itinerant > 0
-    assert e.n_bound > 0
-    assert e.method == "fsum"
-    # The ratio of the two should match the ratio of plasma frequencies squared
-    assert e.n_bound / e.n_itinerant == pytest.approx(40.0 / 10.0, rel=1e-10)
-    # The residual should be the difference from NELECT
-    assert e.fsum_residual == pytest.approx(26.0 - (e.n_itinerant + e.n_bound))
+    # n_itinerant = PREFACTOR_N × X_intra × V
+    expected_n_it = PREFACTOR_N * 10.0 * 100.0
+    assert e.n_itinerant == pytest.approx(expected_n_it, rel=1e-10)
+    assert e.n_bound == pytest.approx(26.0 - expected_n_it, rel=1e-10)
+    assert e.n_itinerant_per_atom == pytest.approx(e.n_itinerant / 3, rel=1e-10)
+    assert e.n_bound_per_atom == pytest.approx(e.n_bound / 3, rel=1e-10)
+    assert e.bound_electron_density == pytest.approx(e.n_bound / 100.0, rel=1e-10)
+    assert e.itinerant_electron_density == pytest.approx(e.n_itinerant / 100.0, rel=1e-10)
+    # Sumrule check: PREFACTOR_N × sumrule × V
+    assert e.sumrule_check == pytest.approx(PREFACTOR_N * 50.0 * 100.0, rel=1e-10)
+
+
+def test_na_bcc_sanity():
+    """Sodium bcc should give ~1 itinerant electron per atom (the 3s¹ conduction electron).
+
+    Reference data from a real VASP calculation:
+      X_intra = 37.394 eV²,   X_sumrule = 245.701 eV²,
+      V = 39.28 Å³,           NELECT = 7  (Na_pv: 2p⁶ 3s¹),  NIONS = 1
+    """
+    e = compute_electron_count(
+        plasma_intra_ev2=37.394,
+        nelect=7.0,
+        volume_ang3=39.28,
+        natoms=1,
+        sumrule_ev2=245.701,
+    )
+    # ~1 itinerant electron per atom (the 3s¹ valence)
+    assert e.n_itinerant == pytest.approx(1.067, rel=2e-2)
+    # Bound = semicore 2p⁶ minus tiny f-sum truncation correction
+    assert e.n_bound == pytest.approx(5.933, rel=2e-2)
+    # Sumrule should imply NELECT ≈ 7 — a clean validation of the prefactor
+    assert e.sumrule_check == pytest.approx(7.0, rel=2e-2)
+
 
 # --- End-to-end pipeline ---------------------------------------------------
-def test_calculator_from_directory_kai(vasp_dir):
+def test_calculator_from_directory(vasp_dir):
     calc = QMetricCalculator.from_directory(vasp_dir)
-    r = calc.compute(method="kai")
+    r = calc.compute()
 
     assert r.material == vasp_dir.name
-    assert r.method == "kai"
     assert r.volume == 100.0
     assert r.nelect == 26.0
-    assert r.electrons.kai == pytest.approx(0.2)
+    assert r.electrons.n_itinerant > 0
+    assert r.electrons.n_bound > 0
     assert r.metric.sqrtG_over_A_xx > 0
     assert r.metric.sqrtG_over_A_yy is not None
     assert r.metric.sqrtG_over_A_zz is not None
-
-
-def test_calculator_from_directory_fsum(vasp_dir):
-    calc = QMetricCalculator.from_directory(vasp_dir)
-    r = calc.compute(method="fsum")
-    assert r.method == "fsum"
-    assert r.electrons.kai is None   # not computed in fsum mode
-    assert r.metric.sqrtG_over_A_xx > 0
 
 
 def test_to_dict_flat(vasp_dir):
@@ -157,8 +166,15 @@ def test_to_dict_flat(vasp_dir):
     # must be flat (no nested dicts)
     for v in d.values():
         assert not isinstance(v, dict)
+    # required scalar fields
     assert "sqrtG_over_A_xx" in d
     assert "I_yy" in d   # anisotropic present
+    assert "N_itinerant" in d
+    assert "N_bound" in d
+    assert "sumrule_check_NELECT" in d
+    # method/Kai must NOT be present anymore
+    assert "Method" not in d
+    assert "Kai" not in d
 
 
 def test_override_files(vasp_dir, tmp_path):
