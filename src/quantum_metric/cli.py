@@ -5,7 +5,6 @@ Usage:
     quantum-metric                                    # current directory
     quantum-metric --dir path/to/vasp/run
     quantum-metric --outcar OUTCAR --poscar POSCAR --dielectric vasprun.xml
-    quantum-metric --method fsum
     quantum-metric --format json
     quantum-metric plot --kind optics
 """
@@ -90,7 +89,6 @@ def _print_table(result: QMetricResult):
 
     # --- inputs
     table.add_section()
-    row("Method", result.method)
     row("Volume", result.volume, "Å³")
     row("NELECT", result.nelect)
     row("NAtoms (NIONS)", result.natoms)
@@ -114,17 +112,15 @@ def _print_table(result: QMetricResult):
     if result.optical.zz is not None:
         row("I_zz = ∫σ/ω dω", result.optical.zz.I)
 
-    # --- electrons
+    # --- electrons (f-sum rule via hydrogen relations)
     table.add_section()
-    if result.electrons.kai is not None:
-        row("Kai ratio", result.electrons.kai)
     row("N_itinerant", result.electrons.n_itinerant)
     row("N_bound", result.electrons.n_bound)
     row("N_itinerant / atom", result.electrons.n_itinerant_per_atom)
     row("N_bound / atom", result.electrons.n_bound_per_atom)
+    row("Itinerant electron density", result.electrons.itinerant_electron_density, "1/Å³")
     row("Bound electron density", result.electrons.bound_electron_density, "1/Å³")
-    if result.electrons.fsum_residual is not None:
-        row("f-sum residual (diagnostic)", result.electrons.fsum_residual)
+    row("Sumrule check (≈ NELECT)", result.electrons.sumrule_check)
 
     # --- quantum metric
     table.add_section()
@@ -187,12 +183,6 @@ def main(
         "--eps",
         help="Path to vasprun.xml or *_eps_imag.dat (overrides auto-discovery).",
     ),
-    method: str = typer.Option(
-        "kai",
-        "--method",
-        "-m",
-        help="Method for N_itinerant: 'kai' (ratio) or 'fsum' (f-sum rule).",
-    ),
     prefactor: float = typer.Option(
         DEFAULT_PREFACTOR,
         "--prefactor",
@@ -218,11 +208,17 @@ def main(
     By default, runs on the current directory. Override the directory with --dir,
     or override individual files with --outcar / --poscar / --dielectric.
 
+    Electron counting uses the f-sum rule applied to the intraband plasma frequency,
+    expressed via hydrogen-atom relations:
+
+        n = (1 / 16π) × (1 / a_B³) × (X_vasp / E_0²)
+
+    with N_bound = NELECT − N_itinerant.
+
     \b
     Examples:
-      quantum-metric                              # current dir, Kai method, pretty table
+      quantum-metric                              # current dir, pretty table
       quantum-metric --dir /path/to/run           # different directory
-      quantum-metric --method fsum                # use f-sum rule instead of Kai ratio
       quantum-metric --format tsv -o results.tsv  # dump TSV to file
       quantum-metric --format json                # print JSON to stdout
       quantum-metric --e-max 15                   # integrate ε₂ only up to 15 eV
@@ -240,7 +236,7 @@ def main(
     try:
         calc = _build_calculator(directory, outcar, poscar, dielectric)
         result = calc.compute(
-            method=method, prefactor=prefactor, e_min=e_min, e_max=e_max
+            prefactor=prefactor, e_min=e_min, e_max=e_max
         )
     except FileNotFoundError as e:
         console.print(f"[red]✗[/red] {e}")
