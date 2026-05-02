@@ -10,7 +10,7 @@ Given a VASP optical calculation, the pipeline is:
 2. Read the imaginary dielectric function $\varepsilon_2(\omega)$ from `vasprun.xml`
 3. Compute the optical conductivity $\sigma(\omega) = \tfrac{\omega}{4\pi}\,\varepsilon_2(\omega)$
 4. Integrate $\sigma(\omega)$ to get various moments
-5. Compute bound / itinerant electron counts
+5. Compute bound / itinerant electron counts (f-sum rule)
 6. Compute the quantum metric $\sqrt{G}$
 
 ## The optical conductivity integrals
@@ -35,46 +35,67 @@ All integrals are evaluated numerically on the VASP energy grid using the trapez
 
 The quantity $I = \int \sigma(\omega)/\omega\,d\omega$ is proportional to the **trace of the quantum metric tensor** integrated over the Brillouin zone — this is the connection to the geometric quantity we care about.
 
-## Bound vs itinerant electrons: two methods
+## Bound vs itinerant electrons: the f-sum rule
 
 VASP's `OUTCAR` reports two plasma-frequency-squared tensors:
 
 - **Intraband** ($\omega^2_{p,\mathrm{intra}}$): Drude-like contribution from electrons at the Fermi surface
 - **Interband** ($\omega^2_{p,\mathrm{inter}}$): contribution from optical transitions to higher bands
 
-`quantum-metric` offers two methods for splitting the total electron count $N_{\rm e}$ (= `NELECT` in `OUTCAR`) into itinerant and bound parts.
+It just so happens that, in perturbation theory, organizing factors of $n e^2/(m_e \varepsilon_0)$ in terms of an energy scale has several advantages. One can therefore use the sum rule to define "plasma frequencies", but it should be kept in mind that this is merely a relabeling. We note this because VASP uses this convention.
 
-### Method 1: Kai ratio (`--method kai`, default)
+### Conversion factor via hydrogen-atom relations
 
-$$
-K = \left|\frac{\omega^2_{p,\mathrm{intra}}}{\omega^2_{p,\mathrm{intra}} + \omega^2_{p,\mathrm{inter}}}\right|
-$$
+VASP provides the square of the plasma frequency in $\text{eV}^2$, which we denote $X_{\rm vasp}$. The goal is to use the relation
 
 $$
-N_{\rm itinerant} = K \cdot N_{\rm e},\qquad N_{\rm bound} = (1-K)\,N_{\rm e}
+n = \frac{\varepsilon_0 m_e}{e^2}\,\omega_p^2
+  = \frac{\varepsilon_0 m_e}{e^2 \hbar^2}\,(\hbar\omega_p)^2
+  = \left(\frac{\varepsilon_0 m_e}{e^2 \hbar^2}\right) X_{\rm vasp}
 $$
 
-This is simple and transparent — the itinerant fraction is just the Drude weight as a fraction of the total spectral weight.
-
-### Method 2: f-sum rule (`--method fsum`)
-
-Both itinerant and bound counts come directly from their respective plasma frequencies:
+to find the number density $n$. While one can use standard values of the universal constants to simplify the prefactors, it is easier to import the standard hydrogen-atom relations
 
 $$
-N_{\rm itinerant} = \frac{\varepsilon_0 m_e V}{\hbar^2}\,\omega^2_{p,\mathrm{intra}}
+E_0 = \frac{e^2}{8\pi\varepsilon_0 a_B} = 13.6\;\text{eV},\qquad
+a_B = \frac{4\pi\varepsilon_0\hbar^2}{e^2 m_e} = 0.529\;\text{Å}
+$$
+
+to write the expression as
+
+$$
+\boxed{\; n = \frac{1}{16\pi}\,\cdot\,\frac{1}{a_B^3}\,\cdot\,\frac{X_{\rm vasp}}{E_0^2}\;}
+$$
+
+Numerically, the prefactor evaluates to
+
+$$
+\frac{1}{16\pi\,a_B^3\,E_0^2} \approx 7.263\times 10^{-4}\;\text{Å}^{-3}\,\text{eV}^{-2}
+$$
+
+### Applying the formula
+
+The library uses the **intraband** channel for the itinerant count, and obtains the bound count by subtraction:
+
+$$
+N_{\rm itinerant} = n_{\rm intra}\cdot V,\qquad n_{\rm intra} = \frac{1}{16\pi\,a_B^3\,E_0^2}\,X_{\rm vasp}^{\rm intra}
 $$
 
 $$
-N_{\rm bound} = \frac{\varepsilon_0 m_e V}{\hbar^2}\,\omega^2_{p,\mathrm{inter}}
+N_{\rm bound} = N_{\rm e} - N_{\rm itinerant}
 $$
 
-If the f-sum rule is exactly satisfied, $N_{\rm itinerant} + N_{\rm bound} = N_{\rm e}$.
-The library reports the residual $N_{\rm e} - (N_{\rm itinerant} + N_{\rm bound})$ as a
-diagnostic of sum-rule satisfaction.
+where $N_{\rm e}$ is `NELECT` from `OUTCAR`.
 
-This uses the absolute magnitude of the intraband plasma frequency to compute a Drude-based electron count, rather than the relative ratio.
+### Sumrule consistency check
 
-The two methods can give noticeably different answers for the same material, especially when the interband contribution is large. Which one is "right" depends on what you're trying to capture.
+As a free diagnostic, the same prefactor applied to VASP's reported total sumrule should recover `NELECT`:
+
+$$
+N_{\rm e}^{\rm implied} = \frac{V}{16\pi\,a_B^3\,E_0^2}\cdot\text{Sumrule}
+$$
+
+Deviation from the true `NELECT` flags numerical issues such as truncation of the optical integral at finite energy. The library reports `sumrule_check_NELECT` for every calculation.
 
 ## The bound electron density
 
@@ -99,6 +120,22 @@ For anisotropic materials, $\sqrt{G}$ is computed separately along xx, yy, zz us
 :::{note}
 In the original workflow that this library replaces, this quantity appeared in column names as `sqrtG_over_A_bound` — a naming accident. No division by the lattice length $|a|$ is actually performed. The column names are kept for backwards compatibility.
 :::
+
+## Worked example: Na bcc
+
+For sodium (bcc, $V = 39.28\;\text{Å}^3$, `NELECT` $= 7$ for the Na_pv pseudopotential including the $2p^6$ semicore):
+
+| Quantity                             | Value     |
+|--------------------------------------|-----------|
+| $X_{\rm vasp}^{\rm intra}$           | 37.394 eV² |
+| Sumrule                              | 245.701 eV² |
+| $n_{\rm intra}$                      | 0.0272 Å⁻³ |
+| $N_{\rm itinerant}$                  | **1.067** |
+| $N_{\rm bound}$                      | 5.933     |
+| $n_{\rm bound}$                      | 0.151 Å⁻³ |
+| $N_{\rm e}^{\rm implied}$ (sumrule check) | 7.011 ✓ |
+
+The itinerant count comes out to ~1 per atom, as expected for the lone $3s^1$ conduction electron. The sumrule check lands almost exactly on `NELECT`, validating both the prefactor and the f-sum integration.
 
 ## References
 
