@@ -14,11 +14,7 @@ from quantum_metric._version import __version__
 from quantum_metric.calculator import QMetricCalculator, QMetricResult
 from quantum_metric.io import read_outcar, read_poscar, read_dielectric
 from quantum_metric.optics import compute_optical_integrals
-from quantum_metric.electrons import (
-    compute_kai,
-    compute_n_itinerant_kai,
-    compute_n_itinerant_fsum,
-)
+from .electrons import compute_electron_count, ElectronCount, PREFACTOR_N
 from quantum_metric.metric import compute_quantum_metric
 
 __all__ = [
