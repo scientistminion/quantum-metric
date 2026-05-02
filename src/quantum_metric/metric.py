@@ -1,22 +1,49 @@
 """
-Quantum metric calculation.
+Quantum metric calculation from the Souza-Wilkens-Martin sum rule.
 
-Formula:
-    sqrtG = sqrt( prefactor * I_αα / n_bound^(1/3) )
+Derivation
+----------
+The SWM sum rule (in SI units) reads
 
-where n_bound is computed from the f-sum rule (see electrons.py).
+    ∫₀^∞ dω  Re[σ_µν(ω)] / ω  =  (π e² / ℏ) · (1/V) · Q_µν                    (1)
 
-where:
-  - prefactor = 0.0694 Angstrom^-1 eV^-1 (unit-conversion constant)
-  - I         = integral[ sigma(omega) / omega dw ]   (from optics.py)
-  - n_bound   = bound electron density (1/Angstrom^3)
+where Q_µν is the full localization tensor (units of L²) and V is the system
+volume. In a periodic system V = N · V_uc and Q_µν = N · N_bound · g_µν, so
 
-The method (kai vs fsum) only affects how n_bound is computed, not the metric
-formula itself. See `electrons.py` for the two electron-counting methods.
+    g_µν  =  (ℏ / π e²) · (1 / n_bound) · I_µν                                 (2)
 
-Note: historical column name is `sqrtG_over_A_bound`, but no division by a_len
-is actually performed — this name is kept for backwards compatibility with
-existing TSV outputs from the original pipeline.
+with the optical-conductivity integral
+
+    I_µν  =  ∫₀^∞ dω  Re[σ_µν(ω)] / ω
+
+To compare across materials we form the dimensionless ratio
+
+    κ_µ  =  n_bound^{-(1/2 - 1/d)} · √g_µµ                                     (3)
+
+where d is the spatial dimension (3 for bulk crystals).
+
+Unit conversions (carried out explicitly below, no magic numbers)
+----------------------------------------------------------------
+VASP gives ε₂(ω) dimensionless and ω in eV. The library computes
+
+    σ_code(ω) = (ω / 4π) ε₂(ω)        [ω in eV, σ_code in eV]
+
+This is the Gaussian-CGS convention. The SI conductivity is
+
+    σ_SI(ω) = ω · ε₀ · ε₂(ω)          [ω in rad/s, σ_SI in S/m]
+
+Working through the conversion (see derivation below in code):
+
+    I_SI [in SI units]  =  (4π ε₀ e / ℏ) · I_code [dimensionless number]
+
+Plugging into (2):
+
+    g [m²]  =  (ℏ / π e²) · (1/n_bound_SI) · I_SI
+            =  (ℏ / π e²) · (1/n_bound_SI) · (4π ε₀ e / ℏ) · I_code
+            =  (4 ε₀ / e) · (1 / n_bound_SI) · I_code
+
+All factors of ℏ and one factor of e cancel — only ε₀ and e survive.
+Converting volume to Å^-3 input gives the final form used in the code.
 """
 
 from __future__ import annotations
@@ -26,75 +53,130 @@ from typing import Optional
 
 import numpy as np
 
-# Prefactor from the original pipeline (units: Angstrom^-1 eV^-1).
-DEFAULT_PREFACTOR = 0.0694
+# ---------------------------------------------------------------------------
+# Fundamental constants (CODATA, SI units)
+# ---------------------------------------------------------------------------
+HBAR     = 1.054_571_817e-34   # J·s         (reduced Planck constant)
+E_CHARGE = 1.602_176_634e-19   # C           (elementary charge)
+M_E      = 9.109_383_7015e-31  # kg          (electron mass)
+EPSILON0 = 8.854_187_8128e-12  # F/m         (vacuum permittivity)
+
+# Unit conversions
+ANG_TO_M = 1.0e-10             # 1 Å = 1e-10 m
+EV_TO_J  = E_CHARGE            # 1 eV = e [in C] joules
 
 
+# ---------------------------------------------------------------------------
+# Result container
+# ---------------------------------------------------------------------------
 @dataclass
 class QuantumMetricResult:
-    """Quantum metric along each direction."""
+    """Quantum metric (g_µµ in Å²) and dimensionless ratio κ_µ along each axis."""
 
-    sqrtG_xx: float
-    sqrtG_yy: Optional[float] = None
-    sqrtG_zz: Optional[float] = None
-    prefactor: float = DEFAULT_PREFACTOR
+    # Dimensionful per-electron metric, units Å²
+    g_xx: float
+    g_yy: Optional[float] = None
+    g_zz: Optional[float] = None
 
-    # Backwards-compatible aliases — the old workflow named these 'sqrtG_over_A_*'
+    # Dimensionless geometric ratio κ = n_bound^{-(1/2 - 1/d)} · √g
+    kappa_xx: float = 0.0
+    kappa_yy: Optional[float] = None
+    kappa_zz: Optional[float] = None
+
+    # Spatial dimension used in the κ normalization
+    dim: int = 3
+
+    # Backwards-compatible aliases — the original pipeline named these sqrtG_over_A_*
     @property
     def sqrtG_over_A_xx(self) -> float:
-        return self.sqrtG_xx
+        return self.kappa_xx
 
     @property
     def sqrtG_over_A_yy(self) -> Optional[float]:
-        return self.sqrtG_yy
+        return self.kappa_yy
 
     @property
     def sqrtG_over_A_zz(self) -> Optional[float]:
-        return self.sqrtG_zz
+        return self.kappa_zz
 
 
+# ---------------------------------------------------------------------------
+# Core computation
+# ---------------------------------------------------------------------------
 def compute_quantum_metric(
     I_xx: float,
     bound_electron_density: float,
     *,
     I_yy: Optional[float] = None,
     I_zz: Optional[float] = None,
-    prefactor: float = DEFAULT_PREFACTOR,
+    dim: int = 3,
 ) -> QuantumMetricResult:
-    """Compute sqrtG = sqrt(prefactor * I / n^(1/3)) for each direction.
+    """Compute g_µµ [Å²] and dimensionless κ_µ along each direction.
 
     Parameters
     ----------
     I_xx, I_yy, I_zz : float
-        Optical conductivity integrals int(sigma/omega domega) along each direction.
+        Optical-conductivity integrals  ∫ σ_code(ω)/ω dω  along each direction.
+        These are the dimensionless numbers produced by `optics.compute_optical_integrals`,
+        with ω in eV and σ_code = (ω/4π)·ε₂.
     bound_electron_density : float
-        N_bound / V in units of 1/Angstrom^3.
-    prefactor : float
-        Unit-conversion constant (default 0.0694 A^-1 eV^-1).
+        n_bound in units of 1/Å³.
+    dim : int
+        Spatial dimension d (default 3 for bulk crystals).
+        Used in the normalization exponent (1/2 - 1/d).
+
+    Returns
+    -------
+    QuantumMetricResult with g_µµ in Å² and dimensionless κ_µ.
+
+    Notes
+    -----
+    Step-by-step (in the body of the function):
+
+      1. Convert n_bound from Å⁻³ to m⁻³ to work in SI.
+      2. Convert I_code (dimensionless, ω-in-eV convention) to I_SI (SI units of σ/ω):
+             I_SI = (4π ε₀ e / ℏ) · I_code
+         The factor (4π ε₀) restores the Gaussian-to-SI conductivity convention,
+         and (e/ℏ) restores the eV-to-rad/s frequency conversion.
+      3. Compute g_SI [m²] from Eq. (2) of the module docstring:
+             g_SI = (ℏ / π e²) · (1/n_bound_SI) · I_SI
+                  = (4 ε₀ / e) · (1/n_bound_SI) · I_code        (after cancellation)
+      4. Convert g back to Å²: g_Å² = g_SI · 1e20.
+      5. Form κ = n_bound^{-(1/2 - 1/d)} · √g (n_bound in Å⁻³, g in Å²
+         → κ has units Å · Å^{-(1/2 - 1/d)·3} = dimensionless when d = 3).
     """
-    if bound_electron_density == 0:
-        raise ValueError(
-            "Bound electron density is exactly 0 → N_bound = 0. "
-            "Check OUTCAR parsing or try the other --method."
-        )
-    if bound_electron_density < 0:
-        raise ValueError(
-            f"Bound electron density is negative ({bound_electron_density:.3g} /Å³). "
-            "With --method fsum this means the intraband plasma freq implies more "
-            "itinerant electrons than NELECT. Try --method kai."
-        )
 
-    den_third = bound_electron_density ** (1.0 / 3.0)
+    # 1. Bound density to SI (m⁻³)
+    n_bound_SI = bound_electron_density / ANG_TO_M**3   # = n_bound_Å · 1e30
 
-    def _one(I):
-        arg = prefactor * I / den_third
-        if arg < 0:
-            raise ValueError(f"sqrtG would be complex: prefactor*I/n^(1/3) = {arg:.3g} < 0")
-        return float(np.sqrt(arg))
+    def _g_in_Ang_squared(I_code: float) -> float:
+        """Convert one I_code value to g [Å²] via the explicit derivation."""
+        # 2. I_code  →  I_SI
+        I_SI = (4.0 * np.pi * EPSILON0 * E_CHARGE / HBAR) * I_code
+        # 3. SWM:  g = (ℏ / π e²) · (1/n_bound) · I_SI
+        g_SI = (HBAR / (np.pi * E_CHARGE**2)) * I_SI / n_bound_SI
+        # (Algebraically equivalent to:  g_SI = (4 ε₀ / e) / n_bound_SI · I_code )
+        # 4. m² → Å²
+        return float(g_SI / ANG_TO_M**2)
+
+    def _kappa(g_AngSq: float) -> float:
+        """Dimensionless κ from g [Å²] and n_bound [Å⁻³]."""
+        # κ = n_bound^{-(1/2 - 1/d)} · √g
+        exponent = -(0.5 - 1.0 / dim)
+        return float(bound_electron_density**exponent * np.sqrt(g_AngSq))
+
+    # xx (always present)
+    g_xx = _g_in_Ang_squared(I_xx)
+    kxx  = _kappa(g_xx)
+
+    # yy, zz (optional)
+    g_yy = _g_in_Ang_squared(I_yy) if I_yy is not None else None
+    g_zz = _g_in_Ang_squared(I_zz) if I_zz is not None else None
+    kyy  = _kappa(g_yy) if g_yy is not None else None
+    kzz  = _kappa(g_zz) if g_zz is not None else None
 
     return QuantumMetricResult(
-        sqrtG_xx=_one(I_xx),
-        sqrtG_yy=_one(I_yy) if I_yy is not None else None,
-        sqrtG_zz=_one(I_zz) if I_zz is not None else None,
-        prefactor=prefactor,
+        g_xx=g_xx, g_yy=g_yy, g_zz=g_zz,
+        kappa_xx=kxx, kappa_yy=kyy, kappa_zz=kzz,
+        dim=dim,
     )
