@@ -1,114 +1,95 @@
 """
-Bound / itinerant electron counting.
+Electron counting via the f-sum rule.
 
-Two methods are supported:
+Number density n is obtained from VASP's plasma frequency squared X_vasp (eV²)
+using the hydrogen-atom convenient form:
 
-1. "kai" method: ratio of intraband vs total plasma frequency squared
-       Kai = |omega_p_intra^2 / (omega_p_intra^2 + omega_p_inter^2)|
-       N_itinerant = Kai * NELECT
-       N_bound     = (1 - Kai) * NELECT
+    n = (1 / (16π)) × (1 / a_B³) × (X_vasp / E_0²)
 
-2. "fsum" method: direct f-sum rule
-       N_itinerant = (epsilon_0 * m_e * V * omega_p_intra^2) / hbar^2
-       N_bound     = NELECT - N_itinerant
+where a_B = 0.529 Å and E_0 = 13.6 eV (Rydberg).
+
+Applied to the intraband channel:    N_itinerant = n_intra × V
+Total bound count:                   N_bound      = NELECT - N_itinerant
+
+This replaces the older "Kai" (ratio-of-plasma-frequencies) method, which
+implicitly assumed equal intraband/interband effective masses and gave
+unphysical results for systems with semicore states (e.g. Na: Kai claimed
+~5.4 itinerant electrons; f-sum correctly gives ~1).
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-import numpy as np
+# Hydrogen-atom constants
+A_B = 0.529          # Bohr radius in Å
+E_0 = 13.6           # Rydberg energy in eV
 
-# Physical constants (SI)
-EPSILON_0 = 8.854_187_817e-12   # F/m
-M_E = 9.109_383_70e-31          # kg
-HBAR = 1.054_571_817e-34        # J s
-EV_TO_J = 1.602_176_634e-19     # J/eV
-ANG3_TO_M3 = 1.0e-30            # Angstrom^3 -> m^3
+# Universal prefactor: n [Å⁻³] = PREFACTOR × X_vasp [eV²]
+import math
+PREFACTOR_N = 1.0 / (16.0 * math.pi * A_B**3 * E_0**2)
+# Numerically ≈ 7.263e-4 Å⁻³ eV⁻²
 
 
 @dataclass
 class ElectronCount:
     """Itinerant / bound electron counts for a single material."""
 
-    method: str               # "kai" or "fsum"
-    kai: float | None         # only meaningful for method == 'kai'
-    n_itinerant: float
-    n_bound: float
+    n_itinerant: float                # total itinerant electrons in cell
+    n_bound: float                    # NELECT - n_itinerant
     n_itinerant_per_atom: float
     n_bound_per_atom: float
-    bound_electron_density: float  # N_bound / V, units: 1/Angstrom^3
-    # Diagnostic for 'fsum' method only: NELECT - (N_itinerant + N_bound)
-    # Should be close to zero if the f-sum rule is satisfied.
-    fsum_residual: float | None = None
+    bound_electron_density: float     # n_bound / V, units 1/Å³
+    itinerant_electron_density: float # n_itinerant / V, units 1/Å³
+    sumrule_check: float              # NELECT_implied from sumrule (diagnostic)
 
 
-def compute_kai(plasma_intra: float, plasma_inter: float) -> float:
-    """Ratio Kai = |plasma_intra / (plasma_intra + plasma_inter)| (plasma freqs squared, eV^2)."""
-    return float(abs(plasma_intra / (plasma_intra + plasma_inter)))
-
-
-def compute_n_itinerant_kai(
-    plasma_intra: float,
-    plasma_inter: float,
-    nelect: float,
-    volume: float,
-    natoms: int,
-) -> ElectronCount:
-    """Compute electron counts via the Kai ratio method."""
-    kai = compute_kai(plasma_intra, plasma_inter)
-    n_it = kai * nelect
-    n_bd = (1.0 - kai) * nelect
-    return ElectronCount(
-        method="kai",
-        kai=kai,
-        n_itinerant=n_it,
-        n_bound=n_bd,
-        n_itinerant_per_atom=n_it / natoms,
-        n_bound_per_atom=n_bd / natoms,
-        bound_electron_density=n_bd / volume,
-    )
-
-def compute_n_itinerant_fsum(
+def compute_electron_count(
     plasma_intra_ev2: float,
-    plasma_inter_ev2: float,
     nelect: float,
     volume_ang3: float,
     natoms: int,
+    sumrule_ev2: float | None = None,
 ) -> ElectronCount:
-    """Compute electron counts via the f-sum rule for both intraband and interband.
+    """Compute itinerant/bound electron counts from the intraband f-sum rule.
 
-        N_itinerant = (epsilon_0 * m_e * V / hbar^2) * omega_p_intra^2
-        N_bound     = (epsilon_0 * m_e * V / hbar^2) * omega_p_inter^2
+    Parameters
+    ----------
+    plasma_intra_ev2 : float
+        VASP intraband plasma frequency squared (eV²), diagonal-averaged.
+    nelect : float
+        Total valence electrons (NELECT from OUTCAR).
+    volume_ang3 : float
+        Primitive cell volume in Å³.
+    natoms : int
+        Number of atoms in the cell (NIONS).
+    sumrule_ev2 : float, optional
+        VASP-reported sumrule (eV²). If provided, used as a consistency check:
+        n_total = PREFACTOR_N × sumrule × V should equal NELECT.
 
-    Both come directly from their respective plasma frequencies, rather than
-    deriving N_bound as NELECT - N_itinerant. The residual NELECT - (N_it + N_bd)
-    is reported as a diagnostic of f-sum rule satisfaction.
-
-    Important: this formula follows the original pipeline convention where
-    omega_p^2 from VASP is used directly in eV^2 (not converted to (rad/s)^2).
-    See docstring in previous version for unit discussion.
+    Returns
+    -------
+    ElectronCount
     """
-    # Precomputed: epsilon_0 * m_e / hbar^2
-    CONST = (EPSILON_0 * M_E) / (HBAR ** 2)
+    # n_itinerant from f-sum rule
+    n_it_density = PREFACTOR_N * plasma_intra_ev2          # Å⁻³
+    n_it = n_it_density * volume_ang3                      # dimensionless count
+    n_bd = nelect - n_it
+    n_bd_density = n_bd / volume_ang3
 
-    # Volume: Angstrom^3 -> m^3
-    volume_si = volume_ang3 * ANG3_TO_M3
-
-    # Direct f-sum counts from intraband and interband plasma frequencies
-    n_it = CONST * volume_si * plasma_intra_ev2
-    n_bd = CONST * volume_si * plasma_inter_ev2
-
-    # Diagnostic: how well the sum rule is satisfied
-    residual = nelect - (n_it + n_bd)
+    # Diagnostic: what NELECT does the sumrule imply?
+    sumrule_check = (
+        PREFACTOR_N * sumrule_ev2 * volume_ang3
+        if sumrule_ev2 is not None
+        else float("nan")
+    )
 
     return ElectronCount(
-        method="fsum",
-        kai=None,
         n_itinerant=float(n_it),
         n_bound=float(n_bd),
         n_itinerant_per_atom=float(n_it / natoms),
         n_bound_per_atom=float(n_bd / natoms),
-        bound_electron_density=float(n_bd / volume_ang3),
-        fsum_residual=float(residual),
+        bound_electron_density=float(n_bd_density),
+        itinerant_electron_density=float(n_it_density),
+        sumrule_check=float(sumrule_check),
     )
