@@ -24,6 +24,7 @@ quantum-metric
 │ NELECT                     │       11 │          │
 │ NAtoms (NIONS)             │        1 │          │
 │ a_len                      │  2.85105 │ Å        │
+│ dimension d                │        3 │          │
 ├────────────────────────────┼──────────┼──────────┤
 │ ω²_p (intraband, xx)       │  101.969 │ eV²      │
 │ ω²_p (interband, xx)       │  348.767 │ eV²      │
@@ -39,15 +40,17 @@ quantum-metric
 │ Bound electron density     │ 0.597059 │ 1/Å³     │
 │ Sumrule check (≈ NELECT)   │  11.0241 │          │
 ├────────────────────────────┼──────────┼──────────┤
-│ √G  (xx)                   │ 0.550697 │          │
-│ prefactor used             │   0.0694 │ Å⁻¹ eV⁻¹ │
+│ g_xx                       │ 0.136243 │ Å²       │
+│ κ_xx                       │ 0.402248 │          │
 └────────────────────────────┴──────────┴──────────┘
 ```
 ## Interpretation
-- fcc Ag has cubic symmetry, so $I_{xx} = I_{yy} = I_{zz}$ and $\sqrt{G}$ is identical along all three directions — a good sanity check that the parser is reading the diagonal tensor components correctly.
-- $N_{\rm itinerant} \approx 1.2$ from the f-sum rule corresponds to roughly one conduction electron per atom — the $5s^1$ valence electron of silver, with a small renormalization that reflects the deviation of the intraband effective mass from $m_e$.
+- fcc Ag has cubic symmetry, so $I_{xx} = I_{yy} = I_{zz}$ and $g_{xx} = g_{yy} = g_{zz}$ — a good sanity check that the parser is reading the diagonal tensor components correctly.
+- $N_{\rm itinerant} \approx 1.2$ from the f-sum rule corresponds to roughly one conduction electron per atom — the $5s^1$ valence electron of silver, with a small renormalization from the deviation of the intraband effective mass from $m_e$.
 - $N_{\rm bound} \approx 9.8$ accounts for the filled $4d^{10}$ shell that contributes to interband transitions but not to the Drude weight.
-- The `Sumrule check` value (≈ 11.0) recovers `NELECT` = 11 to within ~0.2%, confirming that the optical integration is well-converged and the prefactor is correctly applied.
+- $g_{xx} \approx 0.136$ Å² gives a geometric localization length $\sqrt{g_{xx}} \approx 0.37$ Å — a physically sensible scale for the spread of bound-electron Wannier orbitals in a transition metal.
+- $\kappa_{xx} \approx 0.40$ is the dimensionless cross-material ratio. Compare this number across materials in the same dimension to assess relative orbital localization.
+- The `Sumrule check` value (≈ 11.0) recovers `NELECT` = 11 to within ~0.2%, confirming that the optical integration is well-converged and the f-sum rule is correctly applied.
 ## Plotting
 ```bash
 quantum-metric plot --kind optics --output sigma_Ag.png --no-show
