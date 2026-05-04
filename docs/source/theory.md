@@ -95,10 +95,6 @@ For 3D bulk crystals ($d = 3$) the exponent is $1/6$. The library exposes `--dim
 
 For anisotropic materials, $g_{\mu\mu}$ and $\kappa_\mu$ are computed separately along xx, yy, zz using the corresponding direction-resolved $I_{\mu\mu}$.
 
-:::{note}
-Older versions of this library used a single empirical "prefactor" of 0.0694 Å⁻¹ eV⁻¹ in a formula written as $\sqrt{G/A} = \sqrt{\alpha\,I/n_{\rm bound}^{1/3}}$. That value is off from the correct SWM-derived constant by a factor of $\pi$ (it was missing the $\pi$ from the $\hbar/\pi e^2$ in the sum rule). Numerical results from the current version differ from those legacy outputs accordingly. The TSV columns `g_xx_Ang2` and `kappa_xx` (etc.) replace the old `sqrtG_over_A_*` columns; the alias `result.metric.sqrtG_over_A_xx` still exists in the Python API for backwards compatibility but now returns $\kappa$.
-:::
-
 ## Worked example: Ag fcc
 
 For silver (fcc, $V = 16.39\;\text{Å}^3$, `NELECT` = 11 for Ag with $4d^{10}5s^1$):
