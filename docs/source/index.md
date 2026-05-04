@@ -9,7 +9,7 @@ Given a VASP optical calculation run with `LOPTICS = .TRUE.`, `quantum-metric`:
 - Reads the frequency-dependent dielectric function ε₂(ω) directly from `vasprun.xml` (no `sumo` needed) or from pre-computed `*_eps_imag.dat`
 - Computes optical conductivity integrals: ∫σ(ω)/ω dω, ∫σ(ω) dω, ∫ωσ(ω) dω, …
 - Computes bound / itinerant electron counts via the f-sum rule (using hydrogen-atom relations for clean unit conversion)
-- Computes the **quantum metric** $\sqrt{G}$ along xx, yy, zz directions
+- Computes the per-electron **quantum metric** $g_{\mu\mu}$ (Å²) and the dimensionless cross-material ratio $\kappa_\mu$ along xx, yy, zz directions, using the Souza–Wilkens–Martin sum rule with all fundamental constants in SI
 ## Quick start
 ```bash
 pip install quantum-metric

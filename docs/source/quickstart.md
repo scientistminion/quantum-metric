@@ -11,7 +11,7 @@ See the [VASP optics tutorial](https://www.vasp.at/tutorials/latest/response/par
 cd my_vasp_run/
 quantum-metric
 ```
-This uses sensible defaults: f-sum-rule electron counting, the whole energy range, and a pretty-printed table.
+This uses sensible defaults: f-sum-rule electron counting, the SWM sum rule for the metric, dimension d = 3, the whole energy range, and a pretty-printed table.
 ## Example output
 For fcc Ag:
 ```
@@ -23,6 +23,7 @@ For fcc Ag:
 │ NELECT                     │       11 │          │
 │ NAtoms (NIONS)             │        1 │          │
 │ a_len                      │  2.85105 │ Å        │
+│ dimension d                │        3 │          │
 ├────────────────────────────┼──────────┼──────────┤
 │ ω²_p (intraband, xx)       │  101.969 │ eV²      │
 │ ω²_p (interband, xx)       │  348.767 │ eV²      │
@@ -38,12 +39,20 @@ For fcc Ag:
 │ Bound electron density     │ 0.597059 │ 1/Å³     │
 │ Sumrule check (≈ NELECT)   │  11.0241 │          │
 ├────────────────────────────┼──────────┼──────────┤
-│ √G  (xx)                   │ 0.550697 │          │
-│ prefactor used             │   0.0694 │ Å⁻¹ eV⁻¹ │
+│ g_xx                       │ 0.136243 │ Å²       │
+│ κ_xx                       │ 0.402248 │          │
 └────────────────────────────┴──────────┴──────────┘
 ```
-The `Sumrule check (≈ NELECT)` row should land close to the actual `NELECT` value — it's a built-in diagnostic that tells you whether the f-sum integration is well-converged.
+- `g_xx` is the per-electron quantum metric in Å² (so $\sqrt{g_{xx}} \approx 0.37$ Å is the geometric localization length).
+- `κ_xx` is the dimensionless cross-material ratio $\kappa = n_{\rm bound}^{-1/6}\sqrt{g_{xx}}$ for $d = 3$.
+- The `Sumrule check (≈ NELECT)` row should land close to the actual `NELECT` — it confirms the f-sum integration is well-converged.
+
 ## Common workflows
+### 2D systems
+```bash
+quantum-metric --dim 2
+```
+For a monolayer the dimensionless exponent $1/2 - 1/d$ vanishes, so $\kappa = \sqrt{g}$ keeps physical units of length.
 ### Save results to a file
 ```bash
 quantum-metric --format tsv --output ag.tsv

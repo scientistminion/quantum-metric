@@ -12,7 +12,7 @@ By default it processes the current directory. Subcommands are available for plo
 | `--outcar` | path | auto | Path to OUTCAR |
 | `--poscar` | path | auto | Path to POSCAR |
 | `--dielectric`, `--eps` | path | auto | Path to vasprun.xml or `*_eps_imag.dat` |
-| `--prefactor` | float | `0.0694` | Unit-conversion constant (Å⁻¹ eV⁻¹) |
+| `--dim` | int | `3` | Spatial dimension d (3 = bulk, 2 = monolayer, …) for the dimensionless κ |
 | `--e-min` | float | `0.0` | Lower integration bound (eV) |
 | `--e-max` | float | ∞ | Upper integration bound (eV) |
 | `--format`, `-f` | `table` \| `json` \| `tsv` \| `csv` | `table` | Output format |
@@ -20,7 +20,7 @@ By default it processes the current directory. Subcommands are available for plo
 | `--version`, `-V` | — | — | Show version and exit |
 | `--help`, `-h` | — | — | Show help and exit |
 
-Electron counting uses the f-sum rule applied to the intraband plasma frequency, with the bound count obtained as `NELECT − N_itinerant`. See [Theory](theory.md) for the derivation.
+The quantum metric is computed directly from the Souza–Wilkens–Martin sum rule, with all fundamental constants (ℏ, e, ε₀) in SI. The output is the per-electron metric tensor `g_µµ` in Å² and the dimensionless ratio `κ_µ = n_bound^{-(1/2 − 1/d)} √g_µµ`. Electron counting uses the f-sum rule applied to the intraband plasma frequency, with `N_bound = NELECT − N_itinerant`. See [Theory](theory.md) for the full derivation.
 
 ### Examples
 Run on the current directory with defaults:
@@ -34,6 +34,10 @@ quantum-metric --format tsv --output results.tsv
 Limit integration to the 0–15 eV window:
 ```bash
 quantum-metric --e-max 15
+```
+Run on a 2D monolayer:
+```bash
+quantum-metric --dim 2
 ```
 Point at a different directory and override a specific file:
 ```bash
@@ -63,7 +67,7 @@ Plot ε₂(ω) zoomed into the low-energy range:
 quantum-metric plot --kind epsilon --e-max 10
 ```
 ## `quantum-metric info`
-Inspect a directory and report which VASP files are auto-discovered. Handy when multiple `*_eps_imag.dat` files exist or when you want to verify which `OUTCAR` / `POSCAR` / `vasprun.xml` will be used.
+Inspect a directory and report which VASP files are auto-discovered.
 ```bash
 quantum-metric info [OPTIONS]
 ```
