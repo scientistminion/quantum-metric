@@ -3,13 +3,17 @@ Compute the **quantum metric** and related optical quantities from [VASP](https:
 Given a VASP optical calculation (`LOPTICS = .TRUE.`), this tool extracts:
 - Plasma frequencies (intraband, interband) and the f-sum rule, directly from `OUTCAR`
 - The frequency-dependent dielectric function ε₂(ω) from `vasprun.xml` (no `sumo` required) or from pre-computed `*_eps_imag.dat`
-- Optical conductivity integrals: ∫σ(ω)/ω dω, ∫σ(ω) dω, ∫ωσ(ω) dω, ...
-- Bound / itinerant electron counts via the **f-sum rule** with hydrogen-atom relations:
+- Optical conductivity integrals: ∫σ(ω)/ω dω, ∫σ(ω) dω, ∫ωσ(ω) dω, …
+- Bound / itinerant electron counts via the f-sum rule with hydrogen-atom relations:
 
 $$n = \frac{1}{16\pi}\,\cdot\,\frac{1}{a_B^3}\,\cdot\,\frac{X_{\rm vasp}}{E_0^2}, \qquad N_{\rm itinerant} = n_{\rm intra}\cdot V, \qquad N_{\rm bound} = N_{\rm e} - N_{\rm itinerant}$$
 
-  where $a_B = 0.529$ Å and $E_0 = 13.6$ eV. A built-in sumrule consistency check confirms `NELECT` is recovered from the total spectral weight.
-- The quantum metric **√G / A** along xx, yy, zz directions.
+  with a built-in sumrule consistency check.
+- The per-electron quantum metric tensor `g_µµ` (Å²) and dimensionless ratio `κ_µ`, computed directly from the Souza–Wilkens–Martin sum rule:
+
+$$g_{\mu\nu} = \frac{\hbar}{\pi e^2 n_{\rm bound}}\int_{0^+}^\infty\frac{\mathrm{Re}[\sigma_{\mu\nu}(\omega)]}{\omega}d\omega, \qquad \kappa_\mu = \frac{1}{n_{\rm bound}^{1/2 - 1/d}}\sqrt{g_{\mu\mu}}$$
+
+  with all fundamental constants ($\hbar$, $e$, $\varepsilon_0$) in SI — no fitted prefactors.
 ## Installation
 ```bash
 pip install quantum-metric
@@ -30,6 +34,10 @@ You'll get a pretty table with all the quantities computed.
 quantum-metric --outcar ../other_run/OUTCAR \
                --poscar ./POSCAR \
                --dielectric ./vasprun.xml
+```
+### 2D systems
+```bash
+quantum-metric --dim 2
 ```
 ### Different output formats
 ```bash
@@ -57,10 +65,11 @@ from quantum_metric import QMetricCalculator
 # Auto-discover files in a directory
 calc = QMetricCalculator.from_directory("./MoS2")
 result = calc.compute()
-print(result.metric.sqrtG_over_A_xx)
+print(result.metric.g_xx)              # Å²
+print(result.metric.kappa_xx)          # dimensionless (d=3)
 print(result.electrons.n_bound)
-print(result.electrons.sumrule_check)   # diagnostic — should ≈ NELECT
-print(result.to_dict())                 # flat dict, ready for pandas
+print(result.electrons.sumrule_check)  # diagnostic — should ≈ NELECT
+print(result.to_dict())                # flat dict, ready for pandas
 ```
 Or build it from explicit file paths:
 ```python
@@ -69,7 +78,7 @@ calc = QMetricCalculator(
     poscar="./POSCAR",
     dielectric="./vasprun.xml",
 )
-result = calc.compute()
+result = calc.compute(dim=3)
 ```
 ## Requirements
 - Python ≥ 3.9
@@ -80,10 +89,8 @@ The computation follows this pipeline:
 1. Parse `OUTCAR` for intraband / interband plasma frequency tensors, sumrule, volume, NELECT, NIONS.
 2. Parse `POSCAR` for the lattice length `|a|`.
 3. Load ε₂(ω) from `vasprun.xml` (preferred) or an `eps_imag.dat` file.
-4. Compute σ(ω) = (ω / 4π) ε₂(ω) and the integrals `I_xx = ∫σ/ω dω`, etc.
+4. Compute σ(ω) = (ω / 4π) ε₂(ω) and the integrals `I_µµ = ∫σ_µµ/ω dω`.
 5. Compute the itinerant electron count via the f-sum rule applied to the intraband plasma frequency, then `N_bound = NELECT − N_itinerant`.
-6. Compute the metric
-   √G / A = √( prefactor · I_xx / n_bound^(1/3) ) / |a|
-   where *prefactor* = 0.0694 Å⁻¹·eV⁻¹ (unit-conversion constant; overridable with `--prefactor`).
+6. Compute `g_µµ` (in Å²) directly from the SWM sum rule with all fundamental constants in SI, then `κ_µ = n_bound^{−(1/2 − 1/d)} √g_µµ` for cross-material comparison.
 ## License
 MIT
