@@ -154,7 +154,7 @@ def test_metric_ag_fcc():
     r = compute_quantum_metric(I_xx=3.6795, bound_electron_density=0.597, dim=3)
     assert r.g_xx == pytest.approx(0.1362, rel=2e-3)
     assert np.sqrt(r.g_xx) == pytest.approx(0.369, rel=2e-3)
-    assert r.kappa_xx == pytest.approx(0.402, rel=2e-3)
+    assert r.kappa_xx == pytest.approx(0.3108, rel=2e-3)
 
 
 def test_metric_explicit_vs_collapsed():
@@ -174,9 +174,9 @@ def test_metric_explicit_vs_collapsed():
 
 
 def test_metric_2d_dimension():
-    """In 2D (d=2), κ exponent (1/2 - 1/d) = 0, so κ = √g (unitful)."""
+    """In 2D (d=2), κ = n_bound^{1/2} · √g."""
     r = compute_quantum_metric(I_xx=2.0, bound_electron_density=0.3, dim=2)
-    assert r.kappa_xx == pytest.approx(np.sqrt(r.g_xx), rel=1e-12)
+    assert r.kappa_xx == pytest.approx(np.sqrt(0.3) * np.sqrt(r.g_xx), rel=1e-12)
 
 
 # --- End-to-end pipeline ---------------------------------------------------
