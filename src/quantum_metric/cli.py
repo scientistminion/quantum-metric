@@ -21,7 +21,6 @@ from rich.table import Table
 
 from quantum_metric._version import __version__
 from quantum_metric.calculator import QMetricCalculator, QMetricResult
-from quantum_metric.metric import DEFAULT_PREFACTOR
 
 app = typer.Typer(
     help="Compute the quantum metric and optical quantities from VASP output.",
@@ -93,6 +92,7 @@ def _print_table(result: QMetricResult):
     row("NELECT", result.nelect)
     row("NAtoms (NIONS)", result.natoms)
     row("a_len", result.a_len, "Å")
+    row("dimension d", result.metric.dim)
 
     # --- plasma & sumrule
     table.add_section()
@@ -100,7 +100,7 @@ def _print_table(result: QMetricResult):
     row("ω²_p (interband, xx)", result.plasma_inter_xx, "eV²")
     row("Sumrule", result.sumrule, "eV²")
 
-    # --- optical integrals (xx)
+    # --- optical integrals
     table.add_section()
     row("ω²_p from integral (xx)", result.optical.xx.omega_p_squared, "eV²")
     row("I_xx = ∫σ/ω dω", result.optical.xx.I)
@@ -122,14 +122,18 @@ def _print_table(result: QMetricResult):
     row("Bound electron density", result.electrons.bound_electron_density, "1/Å³")
     row("Sumrule check (≈ NELECT)", result.electrons.sumrule_check)
 
-    # --- quantum metric
+    # --- quantum metric (g in Å² and dimensionless κ)
     table.add_section()
-    row("[bold green]√G / A  (xx)[/bold green]", result.metric.sqrtG_over_A_xx)
-    if result.metric.sqrtG_over_A_yy is not None:
-        row("[bold green]√G / A  (yy)[/bold green]", result.metric.sqrtG_over_A_yy)
-    if result.metric.sqrtG_over_A_zz is not None:
-        row("[bold green]√G / A  (zz)[/bold green]", result.metric.sqrtG_over_A_zz)
-    row("prefactor used", result.metric.prefactor, "Å⁻¹ eV⁻¹")
+    row("[bold green]g_xx[/bold green]", result.metric.g_xx, "Å²")
+    if result.metric.g_yy is not None:
+        row("[bold green]g_yy[/bold green]", result.metric.g_yy, "Å²")
+    if result.metric.g_zz is not None:
+        row("[bold green]g_zz[/bold green]", result.metric.g_zz, "Å²")
+    row("[bold green]κ_xx[/bold green]", result.metric.kappa_xx)
+    if result.metric.kappa_yy is not None:
+        row("[bold green]κ_yy[/bold green]", result.metric.kappa_yy)
+    if result.metric.kappa_zz is not None:
+        row("[bold green]κ_zz[/bold green]", result.metric.kappa_zz)
 
     console.print(table)
 
@@ -183,10 +187,10 @@ def main(
         "--eps",
         help="Path to vasprun.xml or *_eps_imag.dat (overrides auto-discovery).",
     ),
-    prefactor: float = typer.Option(
-        DEFAULT_PREFACTOR,
-        "--prefactor",
-        help="Unit-conversion prefactor in Å⁻¹·eV⁻¹ (default 0.0694).",
+    dim: int = typer.Option(
+        3,
+        "--dim",
+        help="Spatial dimension d for the dimensionless κ normalization (default 3).",
     ),
     e_min: float = typer.Option(0.0, "--e-min", help="Lower integration bound (eV)."),
     e_max: Optional[float] = typer.Option(
@@ -208,17 +212,20 @@ def main(
     By default, runs on the current directory. Override the directory with --dir,
     or override individual files with --outcar / --poscar / --dielectric.
 
-    Electron counting uses the f-sum rule applied to the intraband plasma frequency,
-    expressed via hydrogen-atom relations:
+    The quantum metric is computed directly from the Souza-Wilkens-Martin sum rule:
 
-        n = (1 / 16π) × (1 / a_B³) × (X_vasp / E_0²)
+        g_µν = (ℏ / π e²) · (1 / n_bound) · ∫ σ_µν(ω)/ω dω        (units of Å²)
+        κ_µ  = n_bound^{-(1/2 - 1/d)} · √g_µµ                      (dimensionless)
 
+    with all fundamental constants in SI — no fitted prefactors. Electron
+    counting uses the f-sum rule applied to the intraband plasma frequency,
     with N_bound = NELECT − N_itinerant.
 
     \b
     Examples:
       quantum-metric                              # current dir, pretty table
       quantum-metric --dir /path/to/run           # different directory
+      quantum-metric --dim 2                      # 2D system (e.g. monolayer)
       quantum-metric --format tsv -o results.tsv  # dump TSV to file
       quantum-metric --format json                # print JSON to stdout
       quantum-metric --e-max 15                   # integrate ε₂ only up to 15 eV
@@ -229,15 +236,13 @@ def main(
       plot   Plot the optical conductivity or dielectric function
       info   Inspect which VASP files are auto-discovered in a directory
     """
-    
+
     if ctx.invoked_subcommand is not None:
         return
 
     try:
         calc = _build_calculator(directory, outcar, poscar, dielectric)
-        result = calc.compute(
-            prefactor=prefactor, e_min=e_min, e_max=e_max
-        )
+        result = calc.compute(dim=dim, e_min=e_min, e_max=e_max)
     except FileNotFoundError as e:
         console.print(f"[red]✗[/red] {e}")
         raise typer.Exit(code=1)

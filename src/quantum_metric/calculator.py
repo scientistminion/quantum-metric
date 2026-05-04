@@ -34,7 +34,6 @@ from quantum_metric.io import (
     read_poscar,
 )
 from quantum_metric.metric import (
-    DEFAULT_PREFACTOR,
     QuantumMetricResult,
     compute_quantum_metric,
 )
@@ -66,7 +65,7 @@ class QMetricResult:
     # Electron counts (f-sum rule)
     electrons: ElectronCount
 
-    # Quantum metric
+    # Quantum metric (dimensional g in Å² and dimensionless κ)
     metric: QuantumMetricResult
 
     # ------------------------------------------------------------------
@@ -95,19 +94,22 @@ class QMetricResult:
             "itinerant_electron_density": self.electrons.itinerant_electron_density,
             "bound_electron_density": self.electrons.bound_electron_density,
             "sumrule_check_NELECT": self.electrons.sumrule_check,
-            # Metric
-            "sqrtG_over_A_xx": self.metric.sqrtG_over_A_xx,
-            "prefactor": self.metric.prefactor,
+            # Metric (xx is always present)
+            "g_xx_Ang2": self.metric.g_xx,
+            "kappa_xx": self.metric.kappa_xx,
+            "dim": self.metric.dim,
         }
         # Anisotropic fields (only present if dielectric had yy, zz)
         if self.optical.yy is not None:
             d["I_yy"] = self.optical.yy.I
             d["sigma_int_yy"] = self.optical.yy.sigma_int
-            d["sqrtG_over_A_yy"] = self.metric.sqrtG_over_A_yy
+            d["g_yy_Ang2"] = self.metric.g_yy
+            d["kappa_yy"] = self.metric.kappa_yy
         if self.optical.zz is not None:
             d["I_zz"] = self.optical.zz.I
             d["sigma_int_zz"] = self.optical.zz.sigma_int
-            d["sqrtG_over_A_zz"] = self.metric.sqrtG_over_A_zz
+            d["g_zz_Ang2"] = self.metric.g_zz
+            d["kappa_zz"] = self.metric.kappa_zz
         return d
 
 
@@ -205,22 +207,22 @@ class QMetricCalculator:
     def compute(
         self,
         *,
-        prefactor: float = DEFAULT_PREFACTOR,
+        dim: int = 3,
         e_min: float = 0.0,
         e_max: Optional[float] = None,
     ) -> QMetricResult:
         """Run the full pipeline.
 
         Electron counting uses the f-sum rule applied to the intraband
-        plasma frequency, with the prefactor expressed via hydrogen-atom
-        relations:
-
-            n = (1 / 16π) × (1 / a_B³) × (X_vasp / E_0²)
+        plasma frequency (see electrons.py). The quantum metric is computed
+        directly from the Souza-Wilkens-Martin sum rule with all fundamental
+        constants in SI — no fitted prefactors (see metric.py).
 
         Parameters
         ----------
-        prefactor : float
-            Unit-conversion constant for the metric (default 0.0694 Å⁻¹ eV⁻¹).
+        dim : int
+            Spatial dimension d (default 3 for bulk crystals).
+            Used to form the dimensionless κ = n_bound^{-(1/2 - 1/d)} √g.
         e_min, e_max : float
             Integration window on eps_imag (eV).
         """
@@ -243,7 +245,7 @@ class QMetricCalculator:
             I_yy=optical.yy.I if optical.yy is not None else None,
             I_zz=optical.zz.I if optical.zz is not None else None,
             bound_electron_density=electrons.bound_electron_density,
-            prefactor=prefactor,
+            dim=dim,
         )
 
         return QMetricResult(
