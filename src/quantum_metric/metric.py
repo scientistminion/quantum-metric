@@ -160,10 +160,15 @@ def compute_quantum_metric(
         return float(g_SI / ANG_TO_M**2)
 
     def _kappa(g_AngSq: float) -> float:
-        """Dimensionless κ from g [Å²] and n_bound [Å⁻³]."""
-        # κ = n_bound^{-(1/2 - 1/d)} · √g
-        exponent = -(0.5 - 1.0 / dim)
-        return float(bound_electron_density**exponent * np.sqrt(g_AngSq))
+        """Dimensionless κ from g [Å²] and n_bound [Å⁻³].
+
+        κ = √g / n_bound^{-1/d} = n_bound^{1/d} · √g
+        Equivalent to the form  κ = n_bound^{-(1/2 - 1/d)} · √(ℏ I / π e²)
+        in the paper, but written here for code that has already computed g
+        (which absorbs the 1/n_bound from the SWM sum rule).
+        For d = 3: n_bound^(1/3) [Å⁻¹] · √g [Å] = dimensionless ✓
+        """
+        return float(bound_electron_density**(1.0 / dim) * np.sqrt(g_AngSq))
 
     # xx (always present)
     g_xx = _g_in_Ang_squared(I_xx)
