@@ -8,6 +8,7 @@ import pytest
 from quantum_metric import (
     QMetricCalculator,
     compute_electron_count,
+    compute_quantum_metric,
     read_dielectric,
     read_outcar,
     read_poscar,
@@ -110,7 +111,6 @@ def test_electron_count_synthetic():
         natoms=3,
         sumrule_ev2=50.0,
     )
-    # n_itinerant = PREFACTOR_N × X_intra × V
     expected_n_it = PREFACTOR_N * 10.0 * 100.0
     assert e.n_itinerant == pytest.approx(expected_n_it, rel=1e-10)
     assert e.n_bound == pytest.approx(26.0 - expected_n_it, rel=1e-10)
@@ -118,17 +118,11 @@ def test_electron_count_synthetic():
     assert e.n_bound_per_atom == pytest.approx(e.n_bound / 3, rel=1e-10)
     assert e.bound_electron_density == pytest.approx(e.n_bound / 100.0, rel=1e-10)
     assert e.itinerant_electron_density == pytest.approx(e.n_itinerant / 100.0, rel=1e-10)
-    # Sumrule check: PREFACTOR_N × sumrule × V
     assert e.sumrule_check == pytest.approx(PREFACTOR_N * 50.0 * 100.0, rel=1e-10)
 
 
 def test_na_bcc_sanity():
-    """Sodium bcc should give ~1 itinerant electron per atom (the 3s¹ conduction electron).
-
-    Reference data from a real VASP calculation:
-      X_intra = 37.394 eV²,   X_sumrule = 245.701 eV²,
-      V = 39.28 Å³,           NELECT = 7  (Na_pv: 2p⁶ 3s¹),  NIONS = 1
-    """
+    """Sodium bcc should give ~1 itinerant electron per atom (the 3s¹)."""
     e = compute_electron_count(
         plasma_intra_ev2=37.394,
         nelect=7.0,
@@ -136,12 +130,53 @@ def test_na_bcc_sanity():
         natoms=1,
         sumrule_ev2=245.701,
     )
-    # ~1 itinerant electron per atom (the 3s¹ valence)
     assert e.n_itinerant == pytest.approx(1.067, rel=2e-2)
-    # Bound = semicore 2p⁶ minus tiny f-sum truncation correction
     assert e.n_bound == pytest.approx(5.933, rel=2e-2)
-    # Sumrule should imply NELECT ≈ 7 — a clean validation of the prefactor
     assert e.sumrule_check == pytest.approx(7.0, rel=2e-2)
+
+
+# --- Quantum-metric tests ---------------------------------------------------
+def test_metric_dimensions():
+    """g must come out in Å² (positive, finite); κ must be dimensionless and positive."""
+    r = compute_quantum_metric(I_xx=1.0, bound_electron_density=0.5, dim=3)
+    assert r.g_xx > 0
+    assert np.isfinite(r.g_xx)
+    assert r.kappa_xx > 0
+    assert r.dim == 3
+
+
+def test_metric_ag_fcc():
+    """Verify Ag fcc reference numbers from the SWM-derived formula.
+
+    With I_xx = 3.6795 and n_bound = 0.597 Å⁻³ (from f-sum), the SWM sum rule gives
+    g_xx ≈ 0.1362 Å², √g ≈ 0.369 Å, κ_xx ≈ 0.402 (3D).
+    """
+    r = compute_quantum_metric(I_xx=3.6795, bound_electron_density=0.597, dim=3)
+    assert r.g_xx == pytest.approx(0.1362, rel=2e-3)
+    assert np.sqrt(r.g_xx) == pytest.approx(0.369, rel=2e-3)
+    assert r.kappa_xx == pytest.approx(0.402, rel=2e-3)
+
+
+def test_metric_explicit_vs_collapsed():
+    """Sanity: the step-by-step SI calc must match the algebraically-collapsed form."""
+    # Collapsed form: g [Å²] = (4 ε₀ / e) / n_SI · I_code, then ·1e20
+    EPSILON0 = 8.854_187_8128e-12
+    E_CHARGE = 1.602_176_634e-19
+    ANG = 1e-10
+
+    I_code = 2.5
+    n_bound = 0.4
+    n_SI = n_bound / ANG**3
+    g_collapsed = (4.0 * EPSILON0 / E_CHARGE) / n_SI * I_code / ANG**2
+
+    r = compute_quantum_metric(I_xx=I_code, bound_electron_density=n_bound, dim=3)
+    assert r.g_xx == pytest.approx(g_collapsed, rel=1e-10)
+
+
+def test_metric_2d_dimension():
+    """In 2D (d=2), κ exponent (1/2 - 1/d) = 0, so κ = √g (unitful)."""
+    r = compute_quantum_metric(I_xx=2.0, bound_electron_density=0.3, dim=2)
+    assert r.kappa_xx == pytest.approx(np.sqrt(r.g_xx), rel=1e-12)
 
 
 # --- End-to-end pipeline ---------------------------------------------------
@@ -154,32 +189,45 @@ def test_calculator_from_directory(vasp_dir):
     assert r.nelect == 26.0
     assert r.electrons.n_itinerant > 0
     assert r.electrons.n_bound > 0
-    assert r.metric.sqrtG_over_A_xx > 0
-    assert r.metric.sqrtG_over_A_yy is not None
-    assert r.metric.sqrtG_over_A_zz is not None
+    assert r.metric.g_xx > 0
+    assert r.metric.kappa_xx > 0
+    assert r.metric.g_yy is not None
+    assert r.metric.g_zz is not None
+    assert r.metric.dim == 3
+
+
+def test_calculator_dim_argument(vasp_dir):
+    """--dim should propagate through to the metric."""
+    calc = QMetricCalculator.from_directory(vasp_dir)
+    r = calc.compute(dim=2)
+    assert r.metric.dim == 2
 
 
 def test_to_dict_flat(vasp_dir):
     calc = QMetricCalculator.from_directory(vasp_dir)
     r = calc.compute()
     d = r.to_dict()
-    # must be flat (no nested dicts)
     for v in d.values():
         assert not isinstance(v, dict)
     # required scalar fields
-    assert "sqrtG_over_A_xx" in d
+    assert "g_xx_Ang2" in d
+    assert "kappa_xx" in d
     assert "I_yy" in d   # anisotropic present
+    assert "g_yy_Ang2" in d
+    assert "kappa_yy" in d
     assert "N_itinerant" in d
     assert "N_bound" in d
     assert "sumrule_check_NELECT" in d
-    # method/Kai must NOT be present anymore
+    assert "dim" in d
+    # method/Kai/prefactor must NOT be present
     assert "Method" not in d
     assert "Kai" not in d
+    assert "prefactor" not in d
+    assert "sqrtG_over_A_xx" not in d
 
 
 def test_override_files(vasp_dir, tmp_path):
     """Test overriding individual files."""
-    # Put OUTCAR in a different place
     other = tmp_path / "elsewhere"
     other.mkdir()
     (other / "OUTCAR").write_text(SYNTHETIC_OUTCAR)
