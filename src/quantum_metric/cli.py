@@ -10,7 +10,7 @@ Usage:
 """
 
 from __future__ import annotations
-
+import os
 import json
 from pathlib import Path
 from typing import Optional
@@ -21,6 +21,10 @@ from rich.table import Table
 
 from quantum_metric._version import __version__
 from quantum_metric.calculator import QMetricCalculator, QMetricResult
+from quantum_metric.kresolved_plot import plot_band_with_metric
+ 
+ 
+ 
 
 app = typer.Typer(
     help="Compute the quantum metric and optical quantities from VASP output.",
@@ -343,6 +347,77 @@ def info_cmd(
 
     console.print(table)
 
+@app.command("kpath")
+def kpath_cmd(
+    waveder: Path = typer.Option(
+        "WAVEDER", "--waveder", "-w",
+        help="Path to VASP WAVEDER (binary, from LOPTICS=.TRUE.).",
+    ),
+    eigenval: Path = typer.Option(
+        "EIGENVAL", "--eigenval", "-e",
+        help="Path to VASP EIGENVAL.",
+    ),
+    kpoints: Path = typer.Option(
+        "KPOINTS", "--kpoints", "-k",
+        help="Path to line-mode KPOINTS (with high-symmetry labels in '!' comments).",
+    ),
+    outcar: Optional[Path] = typer.Option(
+        "OUTCAR", "--outcar",
+        help="Path to OUTCAR (used for reciprocal lattice → correct k-distances). "
+             "Optional but recommended.",
+    ),
+    output: Path = typer.Option(
+        "bands_with_gk.png", "--output", "-o",
+        help="Output PNG file path.",
+    ),
+    per_electron: bool = typer.Option(
+        False, "--per-electron",
+        help="Plot g(k) / NELECT instead of total g(k).",
+    ),
+    trace_only: bool = typer.Option(
+        False, "--trace-only",
+        help="Plot only Tr[g(k)], hide individual g_xx, g_yy, g_zz "
+             "(cleanest for cubic crystals).",
+    ),
+    ymin: float = typer.Option(-5.0, "--ymin", help="Band-plot lower y limit (E-Ef, eV)."),
+    ymax: float = typer.Option(5.0, "--ymax", help="Band-plot upper y limit (E-Ef, eV)."),
+    title: Optional[str] = typer.Option(None, "--title", help="Plot title (e.g. material name)."),
+    width: float = typer.Option(8.0, "--width", help="Figure width (inches)."),
+    height: float = typer.Option(8.0, "--height", help="Figure height (inches)."),
+):
+    """
+    Plot the band structure with the k-resolved quantum metric g_µν(k) on a
+    line-mode k-path.
+
+    Computes g_µν(k) = Re Σ_{n occ, m unocc} <u_n|∂_µ|u_m><u_m|∂_ν|u_n> from
+    VASP's WAVEDER (wavefunction-derivative matrix elements) and overlays it
+    under the band structure read from EIGENVAL/KPOINTS.
+
+    \b
+    Examples:
+      quantum-metric kpath                                # all defaults
+      quantum-metric kpath --per-electron --title "PbTe"  # per-electron g(k)
+      quantum-metric kpath --trace-only -o trace.png      # only Tr[g] curve
+      quantum-metric kpath --ymin -7 --ymax 7             # wider band window
+      quantum-metric kpath --waveder ../other/WAVEDER     # files from elsewhere
+    """
+    outcar_path = str(outcar) if outcar and os.path.exists(str(outcar)) else None
+    if outcar_path is None and outcar is not None:
+        console.print(f"Note: {outcar} not found; using fractional k-distances.")
+
+    out = plot_band_with_metric(
+        waveder=str(waveder),
+        eigenval=str(eigenval),
+        kpoints_file=str(kpoints),
+        outcar=outcar_path,
+        output=str(output),
+        per_electron=per_electron,
+        trace_only=trace_only,
+        ymin=ymin, ymax=ymax,
+        title=title,
+        width=width, height=height,
+    )
+    console.print(f"[green]✓[/green] Saved to {out}")
 
 if __name__ == "__main__":
     app()

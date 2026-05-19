@@ -16,6 +16,13 @@ from quantum_metric.io import read_outcar, read_poscar, read_dielectric
 from quantum_metric.optics import compute_optical_integrals
 from .electrons import compute_electron_count, ElectronCount, PREFACTOR_N
 from quantum_metric.metric import compute_quantum_metric
+from quantum_metric.kresolved import (
+    compute_kresolved_metric,
+    WavederData,
+    read_waveder,
+    read_eigenval,
+)
+
 
 __all__ = [
     "__version__",
@@ -29,4 +36,8 @@ __all__ = [
     "compute_n_itinerant_kai",
     "compute_n_itinerant_fsum",
     "compute_quantum_metric",
+    "compute_kresolved_metric",
+    "WavederData",
+    "read_waveder",
+    "read_eigenval",
 ]
