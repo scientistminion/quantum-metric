@@ -370,7 +370,7 @@ def plot_band_with_metric(
         trace = gk[:, 0, 0] + gk[:, 1, 1] + gk[:, 2, 2]
         ax_m.plot(dist, trace, color="#d62728", lw=1.8, label=r"Tr$\,[g]$")
 
-    ylabel = r"$g_{\mu\nu}(\mathbf{k})/N_{\rm e}$  ($\rm\AA^{2}$)" if per_electron \
+    ylabel = r"$g_{\mu\nu}(\mathbf{k})$  ($\rm\AA^{2}$)" if per_electron \
         else r"$g_{\mu\nu}(\mathbf{k})$  ($\rm\AA^{2}$)"
     ax_m.set_ylabel(ylabel)
     ax_m.set_xlabel("Wavevector")

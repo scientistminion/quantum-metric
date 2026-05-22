@@ -14,13 +14,34 @@ The quantum metric is then a direct contraction with no energy denominator:
 
     g_µν(k) = Re Σ_{n occ, m unocc} <u_n|∂_µ|u_m> <u_m|∂_ν|u_n>
 
+Normalization
+-------------
+For consistency with the library's bulk SWM value, the per-electron metric is
+normalized by the number of BOUND electrons n_bound (not NELECT). n_bound is
+obtained from the same f-sum electron-counting used by QMetricCalculator
+(intraband plasma frequency from OUTCAR). When the OUTCAR / dielectric data
+needed for that count are unavailable, the code falls back to NELECT and warns.
+
+Spin counting
+-------------
+VASP's CDER is stored per spin channel. For a collinear non-magnetic run
+(no SOC) each stored band represents TWO electrons, so the bare single-channel
+sum is a factor of 2 too small relative to the optical sum rule. For an SOC
+run the spinor wavefunctions already include both spin components, so no extra
+factor is needed. The spin-degeneracy factor is determined by reading the
+LSORBIT flag from the OUTCAR:
+    LSORBIT = .TRUE.  (SOC)        -> factor 1
+    LSORBIT = .FALSE. (collinear)  -> factor 2
+
 References:
     Souza, Wilkens & Martin, PRB 62, 1666 (2000).
     Marzari et al., Rev. Mod. Phys. 84, 1419 (2012).
 """
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 
@@ -31,6 +52,25 @@ __all__ = [
     "read_eigenval",
     "compute_kresolved_metric",
 ]
+
+
+# -----------------------------------------------------------------------------
+# OUTCAR / SOC detection
+# -----------------------------------------------------------------------------
+
+def _soc_enabled(outcar_path):
+    """Return True if LSORBIT=.TRUE. in the OUTCAR (spin-orbit coupling on)."""
+    try:
+        with open(outcar_path) as f:
+            for line in f:
+                if "LSORBIT" in line:
+                    # line looks like:  LSORBIT =      T    spin-orbit coupling
+                    rhs = line.split("=", 1)[1] if "=" in line else line
+                    toks = rhs.upper().split()
+                    return bool(toks) and toks[0].startswith("T")
+    except OSError:
+        pass
+    return False
 
 
 # -----------------------------------------------------------------------------
@@ -130,10 +170,40 @@ def read_eigenval(path):
 
 
 # -----------------------------------------------------------------------------
+# n_bound helper (uses the library's f-sum electron count)
+# -----------------------------------------------------------------------------
+
+def _get_n_bound(waveder_path, fallback_nelect):
+    """Return n_bound for the calculation containing `waveder_path`.
+
+    Runs the library's QMetricCalculator on the WAVEDER's parent directory to
+    obtain the f-sum bound-electron count (consistent with the bulk SWM value).
+    Falls back to NELECT (with a warning) if the required VASP files are
+    missing or the calculator cannot run.
+    """
+    directory = Path(waveder_path).resolve().parent
+    try:
+        # Imported lazily to keep this module decoupled when n_bound isn't needed.
+        from quantum_metric.calculator import QMetricCalculator
+        calc = QMetricCalculator.from_directory(str(directory))
+        res = calc.compute()
+        return float(res.electrons.n_bound)
+    except Exception as exc:
+        warnings.warn(
+            f"Could not compute n_bound from {directory} ({exc!r}); "
+            f"falling back to NELECT={fallback_nelect}. "
+            "Per-electron normalization will use NELECT instead of n_bound.",
+            RuntimeWarning,
+        )
+        return float(fallback_nelect)
+
+
+# -----------------------------------------------------------------------------
 # K-resolved quantum metric
 # -----------------------------------------------------------------------------
 
-def compute_kresolved_metric(waveder_path, eigenval_path, per_electron=False):
+def compute_kresolved_metric(waveder_path, eigenval_path, per_electron=False,
+                             spin_factor="auto", n_bound=None, outcar_path=None):
     """Compute g_µν(k) at every k-point.
 
     Formula (no 1/ΔE² weighting — CDER is the wavefunction derivative,
@@ -144,20 +214,40 @@ def compute_kresolved_metric(waveder_path, eigenval_path, per_electron=False):
     Parameters
     ----------
     waveder_path : str
-        Path to VASP's WAVEDER file (binary, from LOPTICS=.TRUE.)
+        Path to VASP's WAVEDER file (binary, from LOPTICS=.TRUE.).
     eigenval_path : str
-        Path to VASP's EIGENVAL file
+        Path to VASP's EIGENVAL file.
     per_electron : bool, optional
-        If True, divide g(k) by NELECT.
+        If True, divide g(k) by the number of BOUND electrons n_bound
+        (for consistency with the library's bulk SWM value). The bound count
+        is taken from `n_bound` if provided, otherwise computed from the
+        WAVEDER's parent directory via QMetricCalculator, otherwise (if that
+        fails) NELECT is used as a fallback.
+    spin_factor : "auto" | float, optional
+        Spin-degeneracy multiplier:
+          - "auto" : read LSORBIT from the OUTCAR. SOC (LSORBIT=.TRUE.) -> 1.0;
+                     collinear (no SOC) -> 2.0.
+          - 1.0    : force no extra factor (SOC spinor runs).
+          - 2.0    : force the collinear non-magnetic factor.
+          - <float>: any custom multiplier.
+        Default "auto".
+    n_bound : float or None, optional
+        Explicit bound-electron count to use for `per_electron` normalization.
+        If None and `per_electron` is True, it is auto-computed (see above).
+    outcar_path : str or None, optional
+        Path to OUTCAR for SOC detection (spin_factor="auto"). If None, looks
+        for an OUTCAR in the WAVEDER's parent directory.
 
     Returns
     -------
     kpoints : (NKPTS, 3) ndarray
-        k-point fractional coordinates
+        k-point fractional coordinates.
     g : (NKPTS, 3, 3) ndarray
-        Quantum metric tensor at each k-point, in Å²
+        Quantum metric tensor at each k-point, in Å² (total if per_electron is
+        False; per-bound-electron if per_electron is True).
     metadata : dict
-        Energies, occupations, weights, NELECT — useful for downstream plots
+        Energies, occupations, weights, NELECT, spin_factor, n_bound, soc, and
+        the normalization actually used (norm_used) — useful downstream.
     """
     w = read_waveder(waveder_path)
     e = read_eigenval(eigenval_path)
@@ -176,6 +266,18 @@ def compute_kresolved_metric(waveder_path, eigenval_path, per_electron=False):
     else:
         cder = w.cder
 
+    # ---- Resolve spin-degeneracy factor from LSORBIT ----------------------
+    if outcar_path is None:
+        outcar_path = Path(waveder_path).resolve().parent / "OUTCAR"
+    soc = _soc_enabled(outcar_path)
+    if spin_factor == "auto":
+        # SOC (spinor) runs already include both spin components in CDER -> x1.
+        # Collinear non-magnetic runs store one channel -> x2.
+        sf = 1.0 if soc else 2.0
+    else:
+        sf = float(spin_factor)
+
+    # ---- Contract CDER into g_µν(k) ---------------------------------------
     g = np.zeros((w.nkpts, 3, 3))
     for ik in range(w.nkpts):
         occ_mask = e["occupations"][ik] > 0.5
@@ -192,7 +294,19 @@ def compute_kresolved_metric(waveder_path, eigenval_path, per_electron=False):
                 if mu != nu:
                     g[ik, nu, mu] = val
 
-    if per_electron:
-        g = g / e["nelect"]
+    # Apply spin-degeneracy factor (both-spins physical value)
+    g = g * sf
 
+    # ---- Per-electron normalization (by n_bound, consistent with SWM) -----
+    norm_used = None
+    if per_electron:
+        if n_bound is None:
+            n_bound = _get_n_bound(waveder_path, fallback_nelect=e["nelect"])
+        g = g / n_bound
+        norm_used = n_bound
+
+    e["spin_factor"] = sf
+    e["soc"] = soc
+    e["n_bound"] = n_bound
+    e["norm_used"] = norm_used
     return e["kpoints"], g, e
