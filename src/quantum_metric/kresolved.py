@@ -57,17 +57,23 @@ __all__ = [
 # -----------------------------------------------------------------------------
 # OUTCAR / SOC detection
 # -----------------------------------------------------------------------------
-
 def _soc_enabled(outcar_path):
-    """Return True if LSORBIT=.TRUE. in the OUTCAR (spin-orbit coupling on)."""
+    """Return True if LSORBIT=.TRUE. in the OUTCAR (spin-orbit coupling on).
+
+    Handles both VASP output styles for the value:
+      "LSORBIT = .TRUE."   (echoed INCAR tag)
+      "LSORBIT =      T    spin-orbit coupling"  (parsed-parameter line)
+    """
     try:
         with open(outcar_path) as f:
             for line in f:
                 if "LSORBIT" in line:
-                    # line looks like:  LSORBIT =      T    spin-orbit coupling
                     rhs = line.split("=", 1)[1] if "=" in line else line
                     toks = rhs.upper().split()
-                    return bool(toks) and toks[0].startswith("T")
+                    if not toks:
+                        continue
+                    val = toks[0].strip(".")   # ".TRUE." -> "TRUE", "T" -> "T"
+                    return val.startswith("T")
     except OSError:
         pass
     return False
