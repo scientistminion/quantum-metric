@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.abspath("../../src"))
 
 # -- Project information -----------------------------------------------------
 project = "quantum-metric"
-author = "Your Name"
+author = "Fatmagul Katmer"
 copyright = f"{datetime.now().year}, {author}"
 
 # Pull the version from the package
@@ -57,7 +57,7 @@ html_title = f"{project} v{version}"
 html_static_path = ["_static"]
 
 html_theme_options = {
-    "repository_url": "https://github.com/yourusername/quantum-metric",
+    "repository_url": "https://github.com/scientistminion/quantum-metric",
     "repository_branch": "main",
     "path_to_docs": "docs/source",
     "use_repository_button": True,
