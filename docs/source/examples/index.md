@@ -48,8 +48,8 @@ changelog
 ## Citation
 If you use `quantum-metric` in your research, please cite:
 ```
-Your Name. (2026). quantum-metric: A Python package for the quantum metric from VASP.
-GitHub: https://github.com/yourusername/quantum-metric
+Fatmagul Katmer. (2026). quantum-metric: A Python package for the quantum metric from VASP.
+GitHub: https://github.com/scientistminion/quantum-metric
 ```
 ## License
 MIT License — see [LICENSE](https://github.com/yourusername/quantum-metric/blob/main/LICENSE).
